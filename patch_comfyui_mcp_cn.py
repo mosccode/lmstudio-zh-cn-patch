@@ -47,9 +47,10 @@ DOCSTRINGS = {
 
 参数：
     prompt_id：提交工作流时返回的 prompt ID
+    wait_seconds：任务仍在运行/排队时最多等待的秒数（默认 20，上限 40）
 
 返回 status（completed / running / queued / processing / error / not_found）、
-outputs、error、history 和说明文字。""",
+outputs、error、history 和说明文字。completed 时包含 asset_id，可直接用于 view_image。""",
         "list_assets": """列出本次会话最近生成的资产，便于模型记忆和继续迭代。
 
 参数：
@@ -206,15 +207,177 @@ REPLACEMENTS = {
     "comfyui_client.py": [
         (
             '''    def run_custom_workflow(self, workflow: Dict[str, Any], preferred_output_keys: Sequence[str] | None = None, max_attempts: int = 30):''',
+            '''    def run_custom_workflow(self, workflow: Dict[str, Any], preferred_output_keys: Sequence[str] | None = None, max_attempts: int | None = None):
+        if max_attempts is None:
+            # LM Studio 的 MCP 客户端在 60 秒时硬超时，服务端必须先返回任务句柄。
+            max_attempts = int(os.environ.get("COMFY_MCP_WAIT_SECONDS", "45"))''',
+        ),
+        (
             '''    def run_custom_workflow(self, workflow: Dict[str, Any], preferred_output_keys: Sequence[str] | None = None, max_attempts: int = 300):''',
+            '''    def run_custom_workflow(self, workflow: Dict[str, Any], preferred_output_keys: Sequence[str] | None = None, max_attempts: int | None = None):
+        if max_attempts is None:
+            # LM Studio 的 MCP 客户端在 60 秒时硬超时，服务端必须先返回任务句柄。
+            max_attempts = int(os.environ.get("COMFY_MCP_WAIT_SECONDS", "45"))''',
         ),
         (
-            '''                    f"Workflow still running after {max_attempts}s. "''',
-            '''                    f"工作流在 {max_attempts} 秒后仍未完成。"''',
+            '''        if outputs is None:
+            return {
+                "status": "running",
+                "prompt_id": prompt_id,
+                "message": (
+                    f"Workflow still running after {max_attempts}s. "
+                    f"Use get_job(prompt_id='{prompt_id}') to poll for completion."
+                ),
+            }''',
+            '''        if outputs is None:
+            return {
+                "status": "running",
+                "prompt_id": prompt_id,
+                "message": (
+                    f"任务已提交，但 {max_attempts} 秒内未完成；ComfyUI 仍在生成，不是失败。"
+                    f"不要重新提交同一任务。请每隔 10–20 秒调用一次 "
+                    f"get_job(prompt_id='{prompt_id}')，直到 status 为 completed，"
+                    "再用返回的 asset_id 调用 view_image 显示图片。"
+                ),
+                "next_tool": "get_job",
+                "next_args": {"prompt_id": prompt_id},
+            }''',
         ),
         (
-            '''                    f"Use get_job(prompt_id='{prompt_id}') to poll for completion."''',
-            '''                    f"请用 get_job(prompt_id='{prompt_id}') 轮询结果。"''',
+            '''        if outputs is None:
+            return {
+                "status": "running",
+                "prompt_id": prompt_id,
+                "message": (
+                    f"工作流在 {max_attempts} 秒后仍未完成。"
+                    f"请用 get_job(prompt_id='{prompt_id}') 轮询结果。"
+                ),
+            }''',
+            '''        if outputs is None:
+            return {
+                "status": "running",
+                "prompt_id": prompt_id,
+                "message": (
+                    f"任务已提交，但 {max_attempts} 秒内未完成；ComfyUI 仍在生成，不是失败。"
+                    f"不要重新提交同一任务。请每隔 10–20 秒调用一次 "
+                    f"get_job(prompt_id='{prompt_id}')，直到 status 为 completed，"
+                    "再用返回的 asset_id 调用 view_image 显示图片。"
+                ),
+                "next_tool": "get_job",
+                "next_args": {"prompt_id": prompt_id},
+            }''',
+        ),
+    ],
+    "tools/job.py": [
+        (
+            '''import logging
+from typing import Any, Dict, List, Optional''',
+            '''import logging
+import time
+from typing import Any, Dict, List, Optional''',
+        ),
+        (
+            '''    def get_job(prompt_id: str) -> dict:''',
+            '''    def get_job(prompt_id: str, wait_seconds: int = 20) -> dict:''',
+        ),
+        (
+            '''        if not prompt_id or not prompt_id.strip():
+            return {
+                "status": "error",
+                "error": "Invalid prompt_id: empty or None",
+                "prompt_id": prompt_id
+            }
+        
+        try:''',
+            '''        if not prompt_id or not prompt_id.strip():
+            return {
+                "status": "error",
+                "error": "Invalid prompt_id: empty or None",
+                "prompt_id": prompt_id
+            }
+
+        deadline = time.time() + max(0, min(wait_seconds, 40))
+        while True:
+            try:
+                queue_data = comfyui_client.get_queue()
+                active = any(
+                    isinstance(item, list) and len(item) > 1 and item[1] == prompt_id
+                    for item in queue_data.get("queue_running", []) + queue_data.get("queue_pending", [])
+                )
+            except Exception:
+                active = False
+            if not active or time.time() >= deadline:
+                break
+            time.sleep(2)
+        
+        try:''',
+        ),
+        (
+            '''from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger("MCP_Server")''',
+            '''from mcp.server.fastmcp import FastMCP
+
+from tools.helpers import register_and_build_response
+
+logger = logging.getLogger("MCP_Server")''',
+        ),
+        (
+            '''                    # Check if completed with outputs
+                    if "outputs" in prompt_data and prompt_data["outputs"]:
+                        return {
+                            "status": "completed",
+                            "prompt_id": prompt_id,
+                            "outputs": prompt_data["outputs"],
+                            "history": prompt_data,
+                            "message": "Job completed successfully"
+                        }''',
+            '''                    # Check if completed with outputs
+                    if "outputs" in prompt_data and prompt_data["outputs"]:
+                        outputs = prompt_data["outputs"]
+                        response = {
+                            "status": "completed",
+                            "prompt_id": prompt_id,
+                            "outputs": outputs,
+                            "history": prompt_data,
+                            "message": "任务已完成。请用返回的 asset_id 调用 view_image 显示图片。"
+                        }
+                        try:
+                            preferred = ("images", "image", "gifs", "gif", "audio", "audios", "files")
+                            asset_info = comfyui_client._extract_first_asset_info(outputs, preferred)
+                            workflow = None
+                            prompt_meta = prompt_data.get("prompt")
+                            if isinstance(prompt_meta, list) and len(prompt_meta) > 2 and isinstance(prompt_meta[2], dict):
+                                workflow = prompt_meta[2]
+                            metadata = comfyui_client._get_asset_metadata(
+                                asset_info["asset_url"], outputs, preferred, workflow
+                            )
+                            built = register_and_build_response(
+                                {
+                                    "asset_url": asset_info["asset_url"],
+                                    "filename": asset_info["filename"],
+                                    "subfolder": asset_info["subfolder"],
+                                    "folder_type": asset_info["type"],
+                                    "prompt_id": prompt_id,
+                                    "asset_metadata": metadata,
+                                    "comfy_history": prompt_data,
+                                    "submitted_workflow": workflow,
+                                },
+                                "generate_image",
+                                asset_registry,
+                                tool_name="get_job",
+                            )
+                            response.update({
+                                "asset_id": built["asset_id"],
+                                "asset_url": built["asset_url"],
+                                "filename": built["filename"],
+                                "width": built["width"],
+                                "height": built["height"],
+                                "mime_type": built["mime_type"],
+                            })
+                        except Exception as asset_error:
+                            logger.warning(f"Failed to register asset for {prompt_id}: {asset_error}")
+                        return response''',
         ),
     ],
 }
@@ -275,6 +438,12 @@ def build_patched(root: Path, rel: str) -> tuple[Path, str, bool]:
 
     source = path.read_text(encoding="utf-8")
     changed = False
+
+    if rel == "comfyui_client.py" and not re.search(r"(?m)^import os$", source):
+        if "import requests\n" not in source:
+            raise PatchError("comfyui_client.py 中找不到 import requests")
+        source = source.replace("import requests\n", "import os\nimport requests\n", 1)
+        changed = True
 
     if rel in DOCSTRINGS:
         source, count = replace_docstrings(source, DOCSTRINGS[rel], rel)
