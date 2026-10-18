@@ -121,7 +121,7 @@ outputs、error、history 和说明文字。""",
 
 PLACEHOLDER_BLOCK = '''PLACEHOLDER_DESCRIPTIONS = {
     "prompt": "主提示词，决定画面内容。",
-    "seed": "随机种子；不填则每次随机。",
+    "seed": "随机种子；不填或填 -1 时随机。",
     "width": "图片宽度（像素），默认 1024，需为 16 的倍数。",
     "height": "图片高度（像素），默认 1024，需为 16 的倍数。",
     "image": "输入图片文件名（须已存在于 ComfyUI 的 input 目录）。",
@@ -170,6 +170,19 @@ REPLACEMENTS = {
             '''        return f"执行 ComfyUI 工作流「{readable}」。"''',
         ),
         (
+            '''            coerced_value = self._coerce_value(raw_value, param.annotation)
+            for node_id, input_name in param.bindings:''',
+            '''            coerced_value = self._coerce_value(raw_value, param.annotation)
+            if param.name == "seed" and param.annotation is int and coerced_value < 0:
+                # LM Studio 等客户端常用 -1 表示随机；ComfyUI 的 seed 下限是 0
+                coerced_value = random.randint(0, 2**32 - 1)
+            for node_id, input_name in param.bindings:''',
+        ),
+        (
+            '"seed": "随机种子；不填则每次随机。"',
+            '"seed": "随机种子；不填或填 -1 时随机。"',
+        ),
+        (
             '''                raise ValueError(f"Missing required parameter '{param.name}'")''',
             '''                raise ValueError(f"缺少必填参数「{param.name}」")''',
         ),
@@ -191,6 +204,10 @@ REPLACEMENTS = {
         ),
     ],
     "comfyui_client.py": [
+        (
+            '''    def run_custom_workflow(self, workflow: Dict[str, Any], preferred_output_keys: Sequence[str] | None = None, max_attempts: int = 30):''',
+            '''    def run_custom_workflow(self, workflow: Dict[str, Any], preferred_output_keys: Sequence[str] | None = None, max_attempts: int = 300):''',
+        ),
         (
             '''                    f"Workflow still running after {max_attempts}s. "''',
             '''                    f"工作流在 {max_attempts} 秒后仍未完成。"''',

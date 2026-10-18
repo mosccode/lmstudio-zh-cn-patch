@@ -80,6 +80,8 @@ py -3 patch_comfyui_mcp_cn.py --dir "..." --restore
 - 工作流工具的描述改为读取同名 `.meta.json`，可以直接写中文工具说明；找不到时回退为中文的「执行 ComfyUI 工作流「…」」。
 - 修复 `_load_workflows` 把 `*.meta.json` 当作工作流解析、导致服务启动即崩的问题（`AttributeError: 'str' object has no attribute 'get'`）。
 - 汉化常见报错：缺少必填参数、参数类型转换失败、工作流不存在、资产不存在、等待超时。
+- 种子归一化：`seed` 为负数（LM Studio 常用 `-1` 表示随机）时自动换成随机正整数，避免 ComfyUI 报 `Value -1 smaller than min of 0` 的 400 错误。
+- 等待上限提高到 300 秒；超时返回 `status: running` 与 `prompt_id`，可继续用 `get_job` 轮询，而不是误报失败。
 - 原文件备份为 `*.zh-cn-orig`，重复运行幂等；改完逐个执行 `compile()` 检查，失败不写入任何文件。
 
 前置条件：ComfyUI 已在 `http://127.0.0.1:8188` 运行；LM Studio 的 MCP 配置在 `~/.lmstudio/mcp.json`。示例：
@@ -104,6 +106,7 @@ py -3 patch_comfyui_mcp_cn.py --dir "..." --restore
 - 恢复原版：`5-还原图片生成MCP.cmd`，或加 `--restore`。
 - 检查是否已汉化：`--check`，输出「已汉化 / 未汉化」。
 - 依赖：上游 `requirements.txt`（requests / mcp / Pillow），不需要 torch，也不下载模型权重。
+- 显存：Z-Image 的 DiT + 文本编码器约 9.3 GB。LM Studio 里另有一个 9B 模型（约 6.8 GB 权重 + KV）常驻时，12 GB 显卡装不下两者，ComfyUI 会大量使用内存/交换，单张图可能从约 20 秒变成几分钟。需要快速出图时先卸载 LM Studio 中的大模型；否则请等待，并把等待上限内的 `running` 结果用 `get_job` 继续轮询。
 
 ## 文件说明
 
