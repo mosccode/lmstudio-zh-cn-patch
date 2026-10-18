@@ -1,0 +1,7 @@
+.backups/
+*.original
+*.original.version
+__pycache__/
+*.pyc
+temp_script_*.js
+temp_script_*.ts
