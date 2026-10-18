@@ -289,20 +289,41 @@ PLUGIN_ZH_FULL = [
     ("esalesninja/memory", "长期记忆"),
     ("lmstudio/js-code-sandbox", "代码解释器"),
     ("lmstudio/rag-v1", "与文件对话"),
+    ("taipeihugo/big-rag", "知识库检索"),
+    ("altra/web-search", "联网搜索"),
+    ("khtsly/skills", "技能系统"),
 ]
 PLUGIN_ZH_SHORT = [
     ("context-compactor", "上下文压缩"),
     ("memory", "长期记忆"),
     ("js-code-sandbox", "代码解释器"),
     ("rag-v1", "与文件对话"),
+    ("big-rag", "知识库检索"),
+    ("web-search", "联网搜索"),
+    ("skills", "技能系统"),
 ]
+# 旧版补丁写入包里的是前四组映射；扩展时以它为锚点，避免整链重建。
+PLUGIN_ZH_FULL_V1 = PLUGIN_ZH_FULL[:4]
+PLUGIN_ZH_SHORT_V1 = PLUGIN_ZH_SHORT[:4]
 
 
-def plugin_chain(expr, with_short=False):
-    pairs = PLUGIN_ZH_FULL + (PLUGIN_ZH_SHORT if with_short else [])
+def plugin_chain(expr, with_short=False, full=None, short=None):
+    full = PLUGIN_ZH_FULL if full is None else full
+    short = PLUGIN_ZH_SHORT if short is None else short
+    pairs = full + (short if with_short else [])
     for en, zh in pairs:
         expr += '.replace("%s","%s")' % (en, zh)
     return expr
+
+
+def lit(s):
+    """把文案转成可安全嵌入 JS 双引号字符串的形式。"""
+    return (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+    )
 
 
 # 插件配置面板的字段名/说明/选项由插件运行时提供，只能在通用配置行渲染时映射。
@@ -380,6 +401,195 @@ PLUGIN_FIELD_ZH = [
     ),
 ]
 
+# 旧包已写入上面的字段链；下面把新插件的字段追加到链尾。
+PLUGIN_FIELD_ZH_V1 = list(PLUGIN_FIELD_ZH)
+PLUGIN_FIELD_ZH += [
+    # 知识库检索
+    ("Documents Directory", "文档目录"),
+    (
+        "Root directory containing documents to index. All subdirectories will be scanned.",
+        "要建立索引的文档根目录，所有子目录都会被扫描。",
+    ),
+    ("Vector Store Directory", "向量库目录"),
+    (
+        "Directory where the vector database will be stored.",
+        "向量数据库的存储目录。",
+    ),
+    ("Embedding Model", "嵌入模型"),
+    (
+        "LM Studio accepts more than one spelling for the same model—for example "
+        "mixedbread-ai/mxbai-embed-large-v1 (Hub / download) or "
+        "text-embedding-mxbai-embed-large-v1 (as in lms ls). Both are valid; use one value "
+        "consistently for indexing and chat so it matches .big-rag-embedding.json. "
+        "Reindex after changing.",
+        "LM Studio 允许同一模型有多种写法——例如 mixedbread-ai/mxbai-embed-large-v1（Hub / 下载）"
+        "或 text-embedding-mxbai-embed-large-v1（lms ls 中的写法）。两者都有效；索引和对话要始终"
+        "使用同一个值，才能与 .big-rag-embedding.json 匹配。修改后请重建索引。",
+    ),
+    (
+        "Maximum number of chunks to return during retrieval.",
+        "检索时最多返回的片段数。",
+    ),
+    (
+        "Minimum similarity score for a chunk to be considered relevant.",
+        "片段被视为相关所需的最低相似度分数。",
+    ),
+    ("Chunk Size", "分块大小"),
+    (
+        "Size of text chunks for embedding (in words).",
+        "用于嵌入的文本块大小（按词数计）。",
+    ),
+    ("Chunk Overlap", "分块重叠"),
+    (
+        "Overlap between consecutive chunks (in words).",
+        "相邻文本块之间的重叠量（按词数计）。",
+    ),
+    ("Max Concurrent Files", "并发文件数上限"),
+    (
+        "Maximum number of files to process concurrently during indexing. "
+        "Recommend 1 for large PDF datasets.",
+        "建立索引时同时处理的文件数上限。大型 PDF 数据集建议设为 1。",
+    ),
+    ("Parser Delay (ms)", "解析间隔（毫秒）"),
+    (
+        "Wait time before parsing each document (helps avoid WebSocket throttling).",
+        "解析每个文档前的等待时间，可避免 WebSocket 限流。",
+    ),
+    ("Enable OCR", "启用 OCR"),
+    (
+        "Enable OCR for image files and image-based PDFs using LM Studio's built-in document parser.",
+        "使用 LM Studio 内置文档解析器，对图片文件和图片型 PDF 启用 OCR。",
+    ),
+    ("Exclude filename patterns", "排除文件名模式"),
+    (
+        "Optional. One glob per line, matched against each file path relative to Documents Directory "
+        "(use /). Lines starting with # are comments. Example: *.png excludes PNGs in any folder; "
+        "archive/** excludes that subtree. Does not remove chunks already in the vector store—clear "
+        "or reindex to drop old data.",
+        "可选。每行一个通配模式，按相对于文档目录的路径匹配（使用 /）。以 # 开头的行是注释。"
+        "示例：*.png 排除任意文件夹中的 PNG；archive/** 排除该子树。不会移除向量库中已有的片段"
+        "——如需清除旧数据，请清空或重建索引。",
+    ),
+    ("Additional plain-text extensions", "额外纯文本扩展名"),
+    (
+        "Optional. One extension per line (e.g. .java, .cs, .py). Files are read as plain text. "
+        "Binaries such as .exe and .zip are rejected. Built-in types like PDF and EPUB do not need "
+        "to be listed.",
+        "可选。每行一个扩展名（如 .java、.cs、.py）。文件按纯文本读取。.exe、.zip 等二进制文件"
+        "会被拒绝。PDF、EPUB 等内置类型无需列出。",
+    ),
+    ("Manual Reindex Trigger", "手动重建索引"),
+    (
+        "Toggle ON to reindex on the next chat message. Turn it OFF again afterward "
+        "(it does not auto-reset). Use “Skip Previously Indexed Files” to skip unchanged files.",
+        "开启后，在下次对话消息时重建索引。完成后请再关闭（不会自动复位）。"
+        "可用“跳过已索引文件”跳过未变更的文件。",
+    ),
+    ("Skip Previously Indexed Files", "跳过已索引文件"),
+    (
+        "Skip unchanged files for faster manual runs. Only indexes new files or changed files.",
+        "跳过未变更的文件，让手动重建更快。只索引新增或已变更的文件。",
+    ),
+    ("Prompt Template", "提示词模板"),
+    (
+        "Supports {{rag_context}} (required) and {{user_query}} macros for customizing the final prompt.",
+        "支持 {{rag_context}}（必需）和 {{user_query}} 宏，用于自定义最终提示词。",
+    ),
+    # 联网搜索
+    ("Max Search Results", "搜索结果数上限"),
+    (
+        "Number of search results to retrieve per query.",
+        "每次查询获取的搜索结果数量。",
+    ),
+    ("Max Pages to Read", "最多读取页面数"),
+    (
+        "How many pages to actually fetch and read per search. Higher = more thorough, slower.",
+        "每次搜索实际抓取并阅读的页面数。数值越高越详尽，但更慢。",
+    ),
+    ("Page Fetch Timeout (ms)", "页面抓取超时（毫秒）"),
+    (
+        "How long to wait when reading a page before giving up.",
+        "读取页面时的最长等待时间。",
+    ),
+    ("Search Language", "搜索语言"),
+    (
+        "Language/region for search results (e.g. 'en-us', 'en-gb'). Leave blank for global.",
+        "搜索结果的语种/地区（如 'en-us'、'en-gb'）。留空表示全球。",
+    ),
+    ("SearXNG URL", "SearXNG 地址"),
+    (
+        "Base URL of your self-hosted SearXNG instance (e.g. http://localhost:8080). "
+        "Leave blank to use the built-in DDG/Bing scraper. "
+        "SearXNG aggregates many engines and has no rate limits.",
+        "自建 SearXNG 实例的基础 URL（如 http://localhost:8080）。"
+        "留空则使用内置的 DDG/Bing 抓取器。"
+        "SearXNG 聚合多个引擎，且没有速率限制。",
+    ),
+    ("Search Recency Window", "搜索时间范围"),
+    (
+        "Limit all web searches to results published within this window. "
+        "Options: day, week, month, year, any (no filter). "
+        "Narrower windows give fresher results but may reduce result count.",
+        "将所有网页搜索限制在此时间范围内发布的结果。"
+        "可选值：day、week、month、year、any（不限）。"
+        "范围越窄结果越新，但数量可能减少。",
+    ),
+    ("LM Studio URL", "LM Studio 地址"),
+    (
+        "Base URL of your LM Studio instance for embeddings (e.g. http://localhost:1234). "
+        "Used to rerank search results via nomic-embed-text before fetching pages.",
+        "LM Studio 实例的基础 URL，用于嵌入（如 http://localhost:1234）。"
+        "用于在抓取页面前通过 nomic-embed-text 对搜索结果重排序。",
+    ),
+    # 技能系统
+    ("Auto-Inject Skills List", "自动注入技能清单"),
+    (
+        "Automatically inject the list of available skills into every prompt so the model "
+        "knows when to use them",
+        "自动把可用技能清单注入每次提示词，让模型知道何时使用技能。",
+    ),
+    (
+        "On - inject skill list into every prompt (recommended)",
+        "开 — 每次提示词都注入技能清单（推荐）",
+    ),
+    (
+        "Off - only use skills when tools are called explicitly",
+        "关 — 仅在显式调用工具时使用技能",
+    ),
+    ("Max Skills in Context", "上下文内技能上限"),
+    (
+        "Maximum number of skills to list in the injected prompt (1-30)",
+        "注入提示词中列出的技能数量上限（1-30）。",
+    ),
+    ("Skills Paths", "技能目录"),
+    (
+        lit('Semicolon-separated list of skill directories, loaded in order. Leave empty to use '
+            'last saved paths. Enter "default" to reset to ~/.lmstudio/plugin-data/skills'),
+        lit('以分号分隔的技能目录列表，按顺序加载。留空则使用上次保存的路径。'
+            '输入 "default" 可重置为 ~/.lmstudio/plugin-data/skills'),
+    ),
+    ("Shell Path (optional)", "命令解释器路径（可选）"),
+    (
+        "Override the shell used by run_command. Leave empty to auto-detect "
+        "(bash on Unix, pwsh/powershell/cmd on Windows).",
+        "覆盖 run_command 使用的命令解释器。留空则自动检测"
+        "（Unix 用 bash，Windows 用 pwsh/powershell/cmd）。",
+    ),
+    ("Windows Shell", "Windows 命令解释器"),
+    (
+        "Which shell run_command uses on Windows. Select PowerShell to prefer pwsh -> powershell.exe.",
+        "run_command 在 Windows 下使用的命令解释器。选择 PowerShell 会优先使用 pwsh，"
+        "其次 powershell.exe。",
+    ),
+    ("Command Prompt (cmd.exe)", "命令提示符（cmd.exe）"),
+    ("PowerShell (powershell.exe)", "PowerShell（powershell.exe）"),
+]
+
+# 长文案必须先于短字段名替换：短名可能是某段说明的一部分（例如 Documents
+# Directory 就出现在 Exclude filename patterns 的说明里），若先替换短名，后面
+# 整段说明就再也匹配不到了。
+PLUGIN_FIELD_ZH.sort(key=lambda pair: len(pair[0]), reverse=True)
+
 PLUGIN_TOOL_DESC_ZH = [
     # 代码解释器：SDK 的 text 模板会把单换行并成空格，段落间保留空行。
     (
@@ -427,6 +637,332 @@ PLUGIN_TOOL_DESC_ZH = [
     ),
 ]
 
+# 旧包已写入上面的工具说明链；下面把新插件的工具说明追加到链尾。
+PLUGIN_TOOL_DESC_ZH_V1 = list(PLUGIN_TOOL_DESC_ZH)
+PLUGIN_TOOL_DESC_ZH += [
+    # 知识库检索
+    (
+        lit("Search the Big RAG indexed document collection for passages relevant to a query. "
+            "Returns matching text snippets with file names and similarity scores."),
+        lit("在 Big RAG 已索引的文档集合中搜索与查询相关的段落。"
+            "返回匹配的文本片段、文件名和相似度分数。"),
+    ),
+    (
+        lit("Return Big RAG index statistics: chunk count, unique file count, and configured directories."),
+        lit("返回 Big RAG 索引统计：片段数、去重文件数和已配置的目录。"),
+    ),
+    # 联网搜索
+    (
+        lit("ALWAYS call this tool FIRST before calling any search tool. Never skip this step, "
+            "even if the question seems clear.\n\n"
+            "This tool detects ambiguity in the user's question and tells you whether you need to "
+            "ask the user clarifying questions before searching.\n\n"
+            "Two outcomes: STATUS: READY    — question is specific enough, search immediately with "
+            "the refined_query. STATUS: CLARIFY  — question is ambiguous or underspecified. Ask the "
+            "user the listed questions first. Do NOT search until the user answers.\n\n"
+            "Asking one focused round of questions upfront saves wasted searches and gives the user "
+            "a much better, targeted answer."),
+        lit("在调用任何搜索工具之前，务必先调用此工具。即使问题看起来很清楚，也不可跳过。\n\n"
+            "此工具会检测用户问题中的歧义，并告诉你是否需要在搜索前向用户提出澄清问题。\n\n"
+            "两种结果：STATUS: READY —— 问题足够具体，立即用 refined_query 搜索。"
+            "STATUS: CLARIFY —— 问题含糊或信息不足，先向用户提出列出的问题。"
+            "在用户回答前不要搜索。\n\n"
+            "先进行一轮集中提问可以避免无效搜索，并给用户更有针对性的答案。"),
+    ),
+    (
+        lit("The primary research tool. Unlike a basic search engine, this tool: • Retrieves search "
+            "results AND actually reads the top pages (not just snippets) • Returns structured facts "
+            "with source attribution • Surfaces the full page text for you to reason over • Flags "
+            "source credibility for each result\n\n"
+            "Use for: most questions that need factual answers from the web. Prefer deep_search when "
+            "you need multiple angles or research_topic for comprehensive reports."),
+        lit("主要的调研工具。与普通搜索引擎不同，此工具会：• 获取搜索结果，并实际阅读排名靠前的页面"
+            "（不只是摘要）• 返回带来源归属的结构化事实 • 提供完整页面文本供你推理 • 为每个结果标记"
+            "来源可信度\n\n"
+            "适用场景：大多数需要从网络获取事实答案的问题。需要多角度时优先用 deep_search，"
+            "需要综合报告时用 research_topic。"),
+    ),
+    (
+        lit("Fetch a specific URL and read its full content. This is the tool that regular search "
+            "CANNOT do — it gives you the actual article text, not a short snippet.\n\n"
+            "Use when: • The user shares a URL and wants you to read it • A search result looks "
+            "relevant but you need the full text • You need the exact wording of a policy, study, or "
+            "article • You want to verify what a source actually says vs what's quoted elsewhere"),
+        lit("抓取指定 URL 并阅读其完整内容。这是普通搜索做不到的——它给出文章的实际文本，"
+            "而不是简短摘要。\n\n"
+            "适用场景：• 用户提供了 URL 并希望你阅读 • 搜索结果看起来相关，但你需要全文 "
+            "• 你需要政策、研究或文章的原文措辞 • 你想核实来源实际说了什么，而不是别处的引用"),
+    ),
+    (
+        lit("Multi-angle research. Runs 3–5 separate searches from different perspectives on the "
+            "same topic, reads pages for each, and returns everything together.\n\n"
+            "This defeats single-search bias — you get coverage from different angles, not just the "
+            "top SEO results for one query.\n\n"
+            "Angles can be: different framings, pro/con, historical vs current, expert vs critic, "
+            "technical vs practical, etc. Provide your own angles or let the tool pick.\n\n"
+            "Use when: you need a complete picture, not just one answer. Complex topics, "
+            "controversies, research questions, anything where one search could miss something "
+            "important."),
+        lit("多角度调研。针对同一主题从不同视角运行 3–5 次独立搜索，阅读每个角度的页面，"
+            "并把结果汇总返回。\n\n"
+            "这能避免单一搜索的偏差——你得到的覆盖来自不同角度，而不只是某个查询的 SEO 前列结果。\n\n"
+            "角度可以是：不同表述、支持与反对、历史与现状、专家与批评者、技术与实践等。"
+            "你可以自行提供角度，也可让工具选择。\n\n"
+            "适用场景：你需要完整图景而不是单一答案时。复杂话题、争议、研究性问题，"
+            "以及任何单次搜索可能遗漏重要信息的情况。"),
+    ),
+    (
+        lit('Cross-check a specific claim against multiple sources — both supporting and opposing. '
+            "Returns evidence for and against, then a verdict signal.\n\n"
+            "Verdict signals: supported    — multiple independent sources confirm it "
+            "disputed     — credible sources on both sides "
+            "unsupported  — no solid evidence found for it "
+            "nuanced      — true in some context but misleading as stated "
+            "uncertain    — thin coverage, very recent, or inconclusive\n\n"
+            'Use when: someone asserts something as fact and you want to verify it before repeating '
+            'it, or when the user asks "is it true that...".'),
+        lit("将某一具体说法与多个来源交叉核对——既包括支持方，也包括反对方。"
+            "返回支持与反对的证据，并给出结论信号。\n\n"
+            "结论信号：supported——多个独立来源确认；"
+            "disputed——可信来源双方各执一词；"
+            "unsupported——未找到可靠证据支持；"
+            "nuanced——在某种语境下成立，但按原样陈述会误导；"
+            "uncertain——覆盖不足、事件过新或尚无定论\n\n"
+            "适用场景：有人把某件事当作事实陈述，你希望在复述前核实，"
+            "或用户问“这是真的吗……”。"),
+    ),
+    (
+        lit("Verify a specific number, percentage, or statistic and trace it to its primary source. "
+            "Essential because statistics are often: • Outdated (cited from a 10-year-old study) "
+            "• Misquoted (the real number is different) • Out of context (applies to a subset, not "
+            "the general claim) • Fabricated (no original source exists)\n\n"
+            "Returns: primary source candidates, original publisher, date, actual number found."),
+        lit("核实具体数字、百分比或统计量，并追溯到原始来源。这很有必要，因为统计数据经常："
+            "• 过时（引用的是十年前的研究）• 被误引（真实数字不同）"
+            "• 脱离语境（只适用于子集，而非整体结论）• 系伪造（不存在原始来源）\n\n"
+            "返回：主要来源候选、原始发布者、日期、实际找到的数值。"),
+    ),
+    (
+        lit("Trace a claim back to its original source — the study, report, speech, or official "
+            "document where it was first published. This matters because secondary and tertiary "
+            "sources often distort the original finding.\n\n"
+            "Use when: something is widely cited but the original source is unclear, or when you "
+            "want the most authoritative version of a claim."),
+        lit("把某个说法追溯回其原始来源——最早发布该内容的研究、报告、演讲或官方文件。"
+            "这一点很重要，因为二手和三手来源常常会曲解原始结论。\n\n"
+            "适用场景：某说法被广泛引用但原始出处不明，或你希望获得最权威的版本。"),
+    ),
+    (
+        lit("Time-filtered search — only returns results from the specified window. Critical for "
+            "fast-moving topics where older results can be actively misleading.\n\n"
+            "Use when: asking about current events, recent developments, new research, product "
+            "releases, policy changes, or anything where recency matters."),
+        lit("按时间过滤的搜索——只返回指定时间窗口内的结果。对于快速变化的话题至关重要，"
+            "因为较早的结果可能产生误导。\n\n"
+            "适用场景：询问时事、近期进展、新研究、产品发布、政策变化，或任何时效性重要的内容。"),
+    ),
+    (
+        lit("Fetch multiple sources on the same topic and surface where they agree, where they "
+            "conflict, and what each source uniquely claims.\n\n"
+            "This is the tool for detecting spin, bias, and framing differences. The same fact can "
+            "be framed very differently by different publications.\n\n"
+            "Use when: you have multiple URLs to compare, or want to compare coverage of an "
+            "event/topic across different types of sources."),
+        lit("抓取同一主题的多个来源，并列出它们在哪些方面一致、哪些方面冲突，"
+            "以及各自独有的说法。\n\n"
+            "这个工具用于发现倾向性、偏见和叙述框架差异。"
+            "同一事实可能被不同出版物以截然不同的方式呈现。\n\n"
+            "适用场景：你有多个 URL 需要对比，或想比较不同来源对某事件/话题的报道。"),
+    ),
+    (
+        lit("Find what domain experts, researchers, and authoritative institutions actually say "
+            "about a topic — not what random websites claim they say.\n\n"
+            "Targets: academic papers, official statements, expert interviews, research organization "
+            "reports, professional body guidelines.\n\n"
+            "Use when: you need the scientific/expert consensus, not just the popular view. "
+            "Especially useful for health, science, policy, and technical topics."),
+        lit("查找领域专家、研究者和权威机构对某话题的实际看法——而不是普通网站声称他们说了什么。\n\n"
+            "目标来源：学术论文、官方声明、专家访谈、研究机构报告、专业机构指南。\n\n"
+            "适用场景：你需要科学/专家共识，而不只是流行观点。"
+            "对健康、科学、政策和技术类话题尤其有用。"),
+    ),
+    (
+        lit("Search specifically for academic papers, studies, and research publications. Targets: "
+            "arXiv, Semantic Scholar, PubMed, and major research journals.\n\n"
+            "Returns: paper titles, authors, abstracts, publication year, direct links.\n\n"
+            "Use when: the question requires scientific evidence, medical guidance, technical "
+            "research, or any topic where peer review matters."),
+        lit("专门搜索学术论文、研究和科研出版物。目标来源：arXiv、Semantic Scholar、PubMed "
+            "和主要研究期刊。\n\n"
+            "返回：论文标题、作者、摘要、发表年份、直接链接。\n\n"
+            "适用场景：问题需要科学证据、医学指导、技术研究，或任何同行评审很重要的领域。"),
+    ),
+    (
+        lit("Full multi-step research. Runs multiple searches from different angles, reads key "
+            "pages, and assembles everything into a structured research brief.\n\n"
+            "Returns a comprehensive evidence base: key facts, source diversity, open questions, "
+            "and confidence map.\n\n"
+            "Depth levels: overview      — 3 search angles, 1–2 pages each (faster) "
+            "detailed      — 5 angles, 2–3 pages each "
+            "comprehensive — 7 angles, 3 pages each (thorough, takes longer)\n\n"
+            "Use when: someone asks a complex question that needs a full picture, not a quick "
+            "answer — and you want to do it properly in one call."),
+        lit("完整的多步骤调研。从多个角度运行多次搜索，阅读关键页面，"
+            "并把所有内容整理成结构化的调研简报。\n\n"
+            "返回一份全面的证据基础：关键事实、来源多样性、待解问题和置信度图。\n\n"
+            "深度级别：overview——3 个搜索角度，每个 1–2 页（较快）；"
+            "detailed——5 个角度，每个 2–3 页；"
+            "comprehensive——7 个角度，每个 3 页（详尽，耗时更长）\n\n"
+            "适用场景：有人提出需要完整图景的复杂问题，而不是快速答案——"
+            "并且你希望一次调用就做好。"),
+    ),
+    (
+        lit("News-specific search. Targets established journalism and press sources, not SEO "
+            "content farms. Returns recent news coverage with publication signals.\n\n"
+            "Unlike search_recent (which filters by date), this filters by SOURCE TYPE — it actively "
+            "prefers news outlets over blogs, product pages, and opinion sites.\n\n"
+            "Use when: the question is about a current event, breaking news, policy change, "
+            "corporate announcement, or anything where journalistic sourcing matters. Pair with "
+            "search_recent for time-filtered news coverage."),
+        lit("新闻类搜索。面向正规新闻业和媒体来源，而不是 SEO 内容农场。"
+            "返回带有发布信号的近期新闻报道。\n\n"
+            "与按日期过滤的 search_recent 不同，这里按来源类型过滤——"
+            "会优先选择新闻媒体，而非博客、产品页面和观点网站。\n\n"
+            "适用场景：问题涉及时事、突发新闻、政策变化、企业公告，"
+            "或任何报道来源可靠性重要的内容。可与 search_recent 搭配，获取按时间过滤的新闻覆盖。"),
+    ),
+    (
+        lit("Assess the credibility and reliability of a URL or domain. Returns: • Domain type "
+            "(government, academic, news, blog, etc.) • Known credibility signals from the URL "
+            "• Search results about the publication's reputation • Red flags to watch for\n\n"
+            "Use when: a source looks unfamiliar, suspicious, or you want to know how much weight to "
+            "give it before citing it."),
+        lit("评估 URL 或域名的可信度与可靠性。返回：• 域名类型（政府、学术、新闻、博客等）"
+            "• URL 中已知的可信度信号 • 有关该出版物声誉的搜索结果 • 需要警惕的危险信号\n\n"
+            "适用场景：某个来源看起来陌生、可疑，或你想在引用前了解应给予它多少权重。"),
+    ),
+    # 技能系统
+    (
+        lit("List or search available skills. Without a query, returns all skills up to the limit. "
+            "With a query, scores and ranks skills by relevance across name, tags, description, and "
+            "SKILL.md body content - use this to find skills relevant to a task without needing all "
+            "skills in context. Always call read_skill_file on any skill that looks relevant before "
+            "starting work."),
+        lit("列出或搜索可用技能。不提供查询时，返回上限内的所有技能。提供查询时，"
+            "会根据名称、标签、描述和 SKILL.md 正文内容对技能进行相关度评分和排序——"
+            "用它在不把全部技能放进上下文的情况下找到与任务相关的技能。"
+            "开始工作前，务必对任何看起来相关的技能调用 read_skill_file。"),
+    ),
+    (
+        lit("Read a file from within a skill directory. Accepts either a skill name (e.g. 'docx') or "
+            "an absolute path to any file within a skill directory. Defaults to reading the SKILL.md "
+            "entry point when no file_path is given. ALWAYS call this before starting any task the "
+            "skill covers - the SKILL.md contains critical instructions built from trial and error. "
+            "Multiple skills may be relevant to a task; read all of them before proceeding."),
+        lit("读取技能目录中的文件。接受技能名称（如 'docx'）或技能目录内任意文件的绝对路径。"
+            "未提供 file_path 时默认读取入口 SKILL.md。开始任何该技能覆盖的任务前，务必先调用此工具"
+            "——SKILL.md 包含从试错中总结的关键说明。多个技能可能都相关；继续之前请全部读完。"),
+    ),
+    (
+        lit("List all files inside a skill directory. Accepts either a skill name (e.g. 'docx') or an "
+            "absolute path to a skill directory. Use this after reading SKILL.md when you need to "
+            "discover additional supporting files such as helper scripts, templates, or supplementary "
+            "documentation the SKILL.md references."),
+        lit("列出技能目录内的所有文件。接受技能名称（如 'docx'）或技能目录的绝对路径。"
+            "阅读 SKILL.md 后，当你需要查找它引用的辅助脚本、模板或补充文档时使用。"),
+    ),
+    (
+        lit("Read the contents of any file in the user's workspace. Use this to inspect code, data, "
+            "or configuration files outside of the skills directory."),
+        lit("读取用户工作区中的任意文件。用它检查技能目录之外的代码、数据或配置文件。"),
+    ),
+    (
+        lit("Create or overwrite a file completely with new content. Prefer this over run_command for "
+            "writing code or text, as it avoids shell escaping issues."),
+        lit("用新内容完整创建或覆盖文件。写代码或文本时优先使用它而不是 run_command，"
+            "因为它能避免 shell 转义问题。"),
+    ),
+    (
+        lit("Modify an existing file by replacing a specific search string with a new string. Prefer "
+            "this over write_file when making small changes to large files."),
+        lit("通过把特定搜索字符串替换为新字符串来修改现有文件。"
+            "对大型文件做小改动时优先使用它而不是 write_file。"),
+    ),
+    (
+        lit("Execute a shell command on the user's machine. On Windows this runs in PowerShell Core "
+            "(pwsh.exe), PowerShell (powershell.exe), or cmd.exe - whichever is available, in that "
+            "order. On macOS and Linux this runs in bash or sh. The platform and shell fields in the "
+            "response tell you exactly which shell was used so you can adapt syntax accordingly. Use "
+            "this to run scripts, install packages, or perform system tasks. IMPORTANT: Do NOT use "
+            "this to write or edit files via `echo` or `cat`. Use the `write_file` or `patch_file` "
+            "tools instead. Python scripts referenced by skills can be executed directly - copy the "
+            "script path from list_skill_files and run it with python3 (or python on Windows)."),
+        lit("在用户机器上执行 shell 命令。在 Windows 上会按顺序使用 PowerShell Core（pwsh.exe）、"
+            "PowerShell（powershell.exe）或 cmd.exe 中可用的一个。在 macOS 和 Linux 上使用 bash "
+            "或 sh。响应中的 platform 和 shell 字段会准确告诉你使用了哪个 shell，以便你相应调整语法。"
+            "用它运行脚本、安装包或执行系统任务。重要：不要用它通过 `echo` 或 `cat` 写入或编辑文件，"
+            "请改用 `write_file` 或 `patch_file`。技能引用的 Python 脚本可以直接执行——"
+            "从 list_skill_files 复制脚本路径，并用 python3（Windows 上为 python）运行。"),
+    ),
+    (
+        lit("Create a directory (and any missing parent directories) at the given path. Idempotent: "
+            "succeeds silently if the directory already exists, so it is safe to call without "
+            "checking first. Equivalent to `mkdir -p` / `New-Item -Force -ItemType Directory`."),
+        lit("在指定路径创建目录（包括缺失的父目录）。幂等：目录已存在时静默成功，"
+            "因此无需先检查即可安全调用。"
+            "等价于 `mkdir -p` / `New-Item -Force -ItemType Directory`。"),
+    ),
+    (
+        lit("Return path information about the user's environment: home directory, current working "
+            "directory, platform, and path separator. Call this at the start of any task that "
+            "involves absolute paths so you know the correct base path without guessing the username "
+            "or drive letter (e.g. C:\\Users\\user on Windows, /Users/user on macOS, /home/user on "
+            "Linux)."),
+        lit("返回用户环境的路径信息：主目录、当前工作目录、平台和路径分隔符。"
+            "开始任何涉及绝对路径的任务时调用它，这样无需猜测用户名或盘符就能知道正确的基础路径"
+            "（例如 Windows 上的 C:\\Users\\user，macOS 上的 /Users/user，Linux 上的 /home/user）。"),
+    ),
+    (
+        lit("List the contents of any directory on the user's machine, returning a tree of files and "
+            "subdirectories. Use this to understand a project's structure before reading or editing "
+            "files. Prefer this over running `ls` or `dir` via `run_command` - it works the same on "
+            "every platform."),
+        lit("列出用户机器上任意目录的内容，返回文件和子目录树。"
+            "用它先了解项目结构，再读取或编辑文件。"
+            "优先使用它，而不是通过 `run_command` 运行 `ls` 或 `dir`——它在所有平台上行为一致。"),
+    ),
+    (
+        lit("Permanently delete a file or an empty directory. To delete a directory and all its "
+            "contents recursively, set recursive to true - use with caution as this cannot be "
+            "undone. Prefer this over shell commands like `rm` or `Remove-Item` for cross-platform "
+            "reliability."),
+        lit("永久删除文件或空目录。要递归删除目录及其全部内容，请把 recursive 设为 true"
+            "——此操作不可撤销，请谨慎使用。"
+            "为了跨平台可靠性，优先使用它而不是 `rm` 或 `Remove-Item` 等 shell 命令。"),
+    ),
+    (
+        lit("Move a file or directory from one location to another. Works across the same filesystem "
+            "volume. If you need to move across volumes, use run_command as a fallback. Fails if the "
+            "destination already exists to prevent accidental overwrites."),
+        lit("把文件或目录从一个位置移动到另一个位置。适用于同一文件系统卷。"
+            "若需跨卷移动，可改用 run_command。目标已存在时会失败，以防意外覆盖。"),
+    ),
+    (
+        lit("Rename a file or directory in place (same parent directory). For moving to a different "
+            "location use move_file instead. Fails if a file with the new name already exists."),
+        lit("在原位置重命名文件或目录（同一父目录）。要移动到其他位置，请改用 move_file。"
+            "新名称已存在时会失败。"),
+    ),
+    (
+        lit("Append text to the end of an existing file without reading or rewriting the whole thing. "
+            "Ideal for adding lines to logs, .env files, config lists, or any growing file. Creates "
+            "the file (and any missing parent directories) if it does not exist yet."),
+        lit("在现有文件末尾追加文本，无需读取或重写整个文件。"
+            "适合向日志、.env 文件、配置列表或任何不断增长的文件添加行。"
+            "文件（及缺失的父目录）不存在时会自动创建。"),
+    ),
+]
+
 
 def text_chain(expr, pairs):
     for en, zh in pairs:
@@ -434,15 +970,12 @@ def text_chain(expr, pairs):
     return expr
 
 
-def plugin_alias_expr(ident):
-    return (
-        '('
-        + ident + '==="alexandreaxell/context-compactor"?"上下文压缩":'
-        + ident + '==="esalesninja/memory"?"长期记忆":'
-        + ident + '==="lmstudio/js-code-sandbox"?"代码解释器":'
-        + ident + '==="lmstudio/rag-v1"?"与文件对话":""'
-        + ')'
-    )
+def plugin_alias_expr(ident, pairs=None):
+    pairs = PLUGIN_ZH_FULL if pairs is None else pairs
+    expr = "("
+    for en, zh in pairs:
+        expr += '%s==="%s"?"%s":' % (ident, en, zh)
+    return expr + '"")'
 
 
 _TITLE_PREFIX = "`${e.owner}/${e.name}`"
@@ -450,6 +983,37 @@ _TITLE_CHAIN = plugin_chain(_TITLE_PREFIX)
 _TITLE_REST = _TITLE_CHAIN[len(_TITLE_PREFIX):]
 _RUN_JS_EN, _RUN_JS_ZH = PLUGIN_TOOL_DESC_ZH[0]
 _FIRST_TOOL_EN, _FIRST_TOOL_ZH = PLUGIN_TOOL_DESC_ZH[1]
+
+# 旧包里已写入的四组映射链，作为扩展新插件时的锚点。
+_R_CHAIN_BASE = (
+    't.typeParam.displayName?.replace("Enable Thinking","启用思考")'
+    '.replace("Physical\\u0020Batch Size","物理批大小")'
+    '.replace("Context\\u0020Checkpoints","上下文检查点")'
+)
+_D_CHAIN_BASE = (
+    't.typeParam.subtitle?.replace("Controls thinking for chat templates that support enable_thinking.",'
+    '"控制支持 enable_thinking 的对话模板是否先思考。")'
+)
+_FIELD_R_V1 = text_chain(_R_CHAIN_BASE, PLUGIN_FIELD_ZH_V1)
+_FIELD_R_NEW = text_chain(_R_CHAIN_BASE, PLUGIN_FIELD_ZH)
+_FIELD_D_V1 = text_chain(_D_CHAIN_BASE, PLUGIN_FIELD_ZH_V1)
+_FIELD_D_NEW = text_chain(_D_CHAIN_BASE, PLUGIN_FIELD_ZH)
+_DN_V1 = text_chain('(a.displayName??"")', PLUGIN_FIELD_ZH_V1)
+_DN_NEW = text_chain('(a.displayName??"")', PLUGIN_FIELD_ZH)
+_TDN_V1 = text_chain('(t.displayName??"")', PLUGIN_FIELD_ZH_V1)
+_TDN_NEW = text_chain('(t.displayName??"")', PLUGIN_FIELD_ZH)
+_A_V1 = text_chain("a", PLUGIN_FIELD_ZH_V1)
+_A_NEW = text_chain("a", PLUGIN_FIELD_ZH)
+_T_V1 = text_chain("t", PLUGIN_FIELD_ZH_V1)
+_T_NEW = text_chain("t", PLUGIN_FIELD_ZH)
+_TOOL_CHAIN_V1 = text_chain('(a.function.description??"")', PLUGIN_TOOL_DESC_ZH_V1)
+_TOOL_CHAIN_NEW = text_chain('(a.function.description??"")', PLUGIN_TOOL_DESC_ZH)
+_CHAIN_FULL_V1 = plugin_chain("", full=PLUGIN_ZH_FULL_V1)
+_CHAIN_FULL_NEW = plugin_chain("")
+_CHAIN_BOTH_V1 = plugin_chain("", True, PLUGIN_ZH_FULL_V1, PLUGIN_ZH_SHORT_V1)
+_CHAIN_BOTH_NEW = plugin_chain("", True)
+_ALIAS_V1 = plugin_alias_expr("t.identifier", PLUGIN_ZH_FULL_V1)
+_ALIAS_NEW = plugin_alias_expr("t.identifier")
 
 RENDER = [
     # 插件映射旧版把 owner 拼错成 esalesnjina，这里修回。
@@ -751,6 +1315,68 @@ RENDER = [
         'f.filter((t=>(t.identifier+" "+'
         + plugin_alias_expr("t.identifier")
         + ").toLowerCase().includes(v.toLowerCase())))",
+    ),
+    # 新插件：包里已存在旧四组映射链，以下条目把链原位扩展到七组。
+    (
+        "R=d??(" + _FIELD_R_V1 + ")??S(",
+        "R=d??(" + _FIELD_R_NEW + ")??S(",
+    ),
+    (
+        "D=(" + _FIELD_D_V1 + "),j=_||(",
+        "D=(" + _FIELD_D_NEW + "),j=_||(",
+    ),
+    (
+        'return"object"==typeof a?' + _DN_V1 + ':"string"==typeof a?' + _A_V1 + ':a})(l)',
+        'return"object"==typeof a?' + _DN_NEW + ':"string"==typeof a?' + _A_NEW + ':a})(l)',
+    ),
+    (
+        'const e="string"==typeof t,a=e?t:t.value,i=e?' + _T_V1 + ':' + _TDN_V1
+        + ';return(0,n.jsx)(r.SelectItem,',
+        'const e="string"==typeof t,a=e?t:t.value,i=e?' + _T_NEW + ':' + _TDN_NEW
+        + ';return(0,n.jsx)(r.SelectItem,',
+    ),
+    (
+        "label:" + _TOOL_CHAIN_V1 + ",hide:void 0===a.function.description",
+        "label:" + _TOOL_CHAIN_NEW + ",hide:void 0===a.function.description",
+    ),
+    (
+        "t.identifier" + _CHAIN_FULL_V1 + '}),!0===e?',
+        "t.identifier" + _CHAIN_FULL_NEW + '}),!0===e?',
+    ),
+    (
+        "t.identifier" + _CHAIN_FULL_V1 + '})})})})},t.identifier)',
+        "t.identifier" + _CHAIN_FULL_NEW + '})})})})},t.identifier)',
+    ),
+    (
+        '(e?.name??"Plugin")' + _CHAIN_BOTH_V1
+        + '}),(0,r.jsx)("span",{className:"flex-none",children:" README"})',
+        '(e?.name??"Plugin")' + _CHAIN_BOTH_NEW
+        + '}),(0,r.jsx)("span",{className:"flex-none",children:" README"})',
+    ),
+    (
+        "title:(" + _TITLE_PREFIX + _CHAIN_FULL_V1 + "),Icon:l.LuBot",
+        "title:(" + _TITLE_PREFIX + _CHAIN_FULL_NEW + "),Icon:l.LuBot",
+    ),
+    (
+        '(at?et.replace("lmstudio/",""):et)' + _CHAIN_BOTH_V1
+        + '}),(0,n.jsx)(_.PluginListingBadges',
+        '(at?et.replace("lmstudio/",""):et)' + _CHAIN_BOTH_NEW
+        + '}),(0,n.jsx)(_.PluginListingBadges',
+    ),
+    (
+        'L.filter((t=>(t.identifier+" "+' + _ALIAS_V1 + ').toLowerCase().includes(b.toLowerCase())))',
+        'L.filter((t=>(t.identifier+" "+' + _ALIAS_NEW + ').toLowerCase().includes(b.toLowerCase())))',
+    ),
+    (
+        'f.filter((t=>(t.identifier+" "+' + _ALIAS_V1 + ').toLowerCase().includes(v.toLowerCase())))',
+        'f.filter((t=>(t.identifier+" "+' + _ALIAS_NEW + ').toLowerCase().includes(v.toLowerCase())))',
+    ),
+    # 聊天输入框的插件胶囊：取 manifest 的 owner/name，走独立的三元映射。
+    (
+        'return"context-compactor"===u.name?"上下文压缩":"memory"===u.name?"长期记忆":u.name',
+        'return"context-compactor"===u.name?"上下文压缩":"memory"===u.name?"长期记忆"'
+        ':"big-rag"===u.name?"知识库检索":"web-search"===u.name?"联网搜索"'
+        ':"skills"===u.name?"技能系统":u.name',
     ),
 ]
 
