@@ -1,6 +1,6 @@
 # LM Studio 简体中文补丁
 
-给 [LM Studio](https://lmstudio.ai/) 桌面端补上完整简体中文界面。在上游汉化补丁的基础上，补充了插件面板、插件筛选、引擎加载参数、多行工具提示等上游未覆盖的文案，并带有版本校验和一键还原。
+给 [LM Studio](https://lmstudio.ai/) 桌面端补上完整简体中文界面。在上游汉化补丁的基础上，补充了插件面板、插件筛选、引擎加载参数、多行工具提示等上游未覆盖的文案，并带有版本校验和一键还原。另附联网搜索插件的国内后端补丁，让搜索在境内网络下可用。
 
 当前验证版本：**LM Studio 0.4.26+4（Windows）**，理论上适用于 0.4.15+ 的 Electron 版本。
 
@@ -12,6 +12,7 @@
 - 插件筛选框支持中文别名（记忆 / 压缩 / 代码 / 文件 / 知识库 / 联网 / 技能），英文标识符仍可搜索。
 - 引擎加载参数中文化：思考开关、物理批大小、上下文检查点、投机解码及其悬停提示。
 - 版本校验：LM Studio 升级后，旧备份会自动存档，并按新版本重建英文备份；跨版本备份禁止用于还原。
+- 联网搜索插件国内化：中文查询优先百度，英文查询优先必应中国，搜狗随后，DuckDuckGo 仅作兜底；请求与网页抓取均使用中文语言头。
 
 ## 环境要求
 
@@ -28,6 +29,7 @@
 3. 完全退出 LM Studio（包括托盘图标）。
 4. 双击 `0-应用中文.cmd`。脚本会提示关闭正在运行的 LM Studio，并在完成后询问是否重新启动。
 5. 需要还原时，双击 `1-还原英文.cmd`。
+6. 可选：联网搜索插件国内化，双击 `2-应用国内搜索.cmd`；恢复插件原版双击 `3-还原国内搜索.cmd`。该补丁作用于已安装的 `altra/web-search` 插件，与界面汉化互不影响。
 
 也可以直接运行命令：
 
@@ -35,6 +37,9 @@
 py -3 cn_localize.py apply
 py -3 cn_localize.py restore
 py -3 cn_localize.py status
+py -3 patch_websearch_cn.py
+py -3 patch_websearch_cn.py --restore
+py -3 patch_websearch_cn.py --check
 ```
 
 `status` 只读，显示界面语言、当前版本、备份版本与运行状态。
@@ -49,6 +54,19 @@ py -3 cn_localize.py status
 - 还原时，拒绝跨版本备份，避免把旧版界面文件写进新版程序。
 - `status` 会显示版本不一致的警告。
 
+## 联网搜索插件国内化
+
+`2-应用国内搜索.cmd` 修改已安装的 `altra/web-search` 插件运行时文件：
+
+```
+~/.lmstudio/extensions/plugins/altra/web-search/.lmstudio/production.js
+```
+
+- 后端顺序：SearXNG（若已配置）→ 中文查询「百度 → 必应中国 → 搜狗」/ 英文查询「必应中国 → 百度 → 搜狗」→ DuckDuckGo 最后兜底。
+- 必应固定使用 `cn.bing.com`（`setlang=zh-hans&cc=cn`），请求与网页抓取使用 `zh-CN` 语言头。
+- 原文件备份为 `production.js.websearch-cn.orig`；重复运行不会叠加修改；语法检查失败会自动还原；插件版本变化导致锚点不匹配时拒绝修改。
+- 恢复原版：`3-还原国内搜索.cmd`，或 `py -3 patch_websearch_cn.py --restore`。
+
 ## 文件说明
 
 | 文件 | 作用 |
@@ -58,13 +76,16 @@ py -3 cn_localize.py status
 | `T_dict.json` | 上游翻译词典 |
 | `patch_extra.py` | 增强补丁：属性 / 纯文本 / 词典 / 渲染链 / 布局 |
 | `T_extra.json` | 增强补丁的词典数据 |
-| `0-应用中文.cmd` / `1-还原英文.cmd` | 双击入口 |
+| `patch_websearch_cn.py` | 联网搜索插件补丁：国内后端与中文请求头 |
+| `0-应用中文.cmd` / `1-还原英文.cmd` | 界面汉化双击入口 |
+| `2-应用国内搜索.cmd` / `3-还原国内搜索.cmd` | 联网搜索插件双击入口 |
 
 补丁会先校验内嵌 JSON 和 JS 语法，失败时不会写入坏文件；应用补丁后若语法检查不通过，会自动还原。
 
 ## 实现概要
 
-- 补丁只修改渲染进程的界面文件 `resources/app/.webpack/renderer/main_window.js`，不改 `lms.exe`，不改模型与配置。
+- 汉化补丁只修改渲染进程的界面文件 `resources/app/.webpack/renderer/main_window.js`，不改 `lms.exe`，不改模型与配置。
+- 联网搜索补丁只修改 `altra/web-search` 插件的 `.lmstudio/production.js`，不涉及界面文件和其他插件。
 - 增强部分按顺序执行：属性替换 → 纯文本替换 → 迁移旧译名 → 内嵌词典 → 渲染链映射 → 布局微调。
 - 所有替换均为幂等操作，重复运行不会叠加或损坏文本。
 - 正则和直接替换都避开路由名、schema 枚举、插件标识符等运行时数据。
@@ -72,6 +93,8 @@ py -3 cn_localize.py status
 ## 已知限制
 
 - 每次 LM Studio 升级后都需要重新应用补丁。
+- 联网搜索插件更新会覆盖 `production.js`，更新插件后需要重新运行 `2-应用国内搜索.cmd`。
+- 百度 / 搜狗页面结构变化时，对应解析规则可能需要更新。
 - 上游界面结构变动时，个别文案可能需要更新替换锚点。
 - 仅覆盖界面文本；模型输出、插件元数据里的原始标识符保持英文。
 - 首次运行会生成 30 MB 以上的原版界面备份，仓库不包含该备份。
