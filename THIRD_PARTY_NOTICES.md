@@ -35,6 +35,25 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## joenorton/comfyui-mcp-server
+
+`patch_comfyui_mcp_cn.py` is a patch script for an installed copy of
+[joenorton/comfyui-mcp-server](https://github.com/joenorton/comfyui-mcp-server).
+This repository does not include or redistribute the upstream source code.
+The upstream project is licensed under the Apache License 2.0 and includes the
+following NOTICE:
+
+```
+ComfyUI-MCP-Server
+Copyright 2026 Joe Norton
+
+This project is an independent MCP server integration for ComfyUI.
+ComfyUI is a separate project and is not affiliated with this repository.
+```
+
+A copy of the Apache License 2.0 is available at
+<https://www.apache.org/licenses/LICENSE-2.0>.
+
 ## LM Studio
 
 LM Studio is a product of Element Labs, Inc. This project is an unofficial
